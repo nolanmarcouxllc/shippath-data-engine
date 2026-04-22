@@ -1,25 +1,19 @@
 import { Actor } from 'apify';
-import { CheerioCrawler } from 'crawlee';
 
 await Actor.init();
 
 // ─────────────────────────────────────────────
-// INPUT — comes from Apify or City Input List
+// INPUT
 // ─────────────────────────────────────────────
 const input = await Actor.getInput() ?? {};
 const {
-    states = ['GA', 'TN', 'AR', 'MS'],  // Default: Savannah + Memphis states
-    maxRequestsPerCrawl = 500,
+    states = ['GA', 'TN', 'AR', 'MS'],
 } = input;
 
 // ─────────────────────────────────────────────
-// USDA FSIS API — public, no login required
-// Returns all establishments by state
+// REGION MAPS
 // ─────────────────────────────────────────────
-const BASE_URL = 'https://efts.fsis.usda.gov/efts-web/better_search';
-
-const REGION_MAP = {
-    // States → Hub
+const HUB_MAP = {
     CA: 'LA/Inland Empire', NV: 'LA/Inland Empire',
     IL: 'Chicago', IN: 'Chicago', WI: 'Chicago',
     TX: 'Dallas-FW',
@@ -30,7 +24,7 @@ const REGION_MAP = {
     FL: 'Miami/South FL',
 };
 
-const FREIGHT_REGION_MAP = {
+const FREIGHT_MAP = {
     CA: 'West Coast', NV: 'West Coast',
     IL: 'Midwest', IN: 'Midwest', WI: 'Midwest',
     TX: 'Central',
@@ -41,7 +35,7 @@ const FREIGHT_REGION_MAP = {
     FL: 'Southeast',
 };
 
-const CENSUS_REGION_MAP = {
+const CENSUS_MAP = {
     CA: 'West', NV: 'West', WA: 'West', OR: 'West',
     IL: 'Midwest', IN: 'Midwest', WI: 'Midwest',
     TX: 'South', GA: 'South', TN: 'South',
@@ -50,95 +44,93 @@ const CENSUS_REGION_MAP = {
 };
 
 // ─────────────────────────────────────────────
-// BUILD URLS — one per state
+// SCRAPE EACH STATE
 // ─────────────────────────────────────────────
-const startUrls = states.map(state => ({
-    url: `${BASE_URL}?establishmentType=Meat%2C+Poultry%2C+Egg&state=${state}&pageNumber=1&numberOfElements=100`,
-    userData: { state, page: 1 },
-}));
+const BASE = 'https://www.fsis.usda.gov/fsis/api/establishments/mpi';
+const TODAY = new Date().toISOString().split('T')[0];
+let totalRecords = 0;
 
-const allResults = [];
+for (const state of states) {
+    console.log(`Scraping state: ${state}`);
+    let pageIndex = 1;
+    let hasMore = true;
 
-// ─────────────────────────────────────────────
-// CRAWLER
-// ─────────────────────────────────────────────
-const crawler = new CheerioCrawler({
-    maxRequestsPerCrawl,
+    while (hasMore) {
+        const url = `${BASE}?state=${state}&pageIndex=${pageIndex}&pageSize=100`;
 
-    async requestHandler({ request, $, crawler }) {
-        const { state, page } = request.userData;
-
-        // USDA returns JSON embedded in the page — parse it
-        let data;
         try {
-            const raw = $('body').text().trim();
-            data = JSON.parse(raw);
-        } catch (e) {
-            console.log(`Could not parse JSON for ${state} page ${page}`);
-            return;
+            const response = await fetch(url, {
+                headers: {
+                    'Accept': 'application/json',
+                    'User-Agent': 'Mozilla/5.0 (compatible; ShipPath/1.0)',
+                }
+            });
+
+            if (!response.ok) {
+                console.log(`Error ${response.status} for ${state} page ${pageIndex}`);
+                hasMore = false;
+                break;
+            }
+
+            const data = await response.json();
+            const records = Array.isArray(data) ? data : (data.data ?? data.results ?? data.establishments ?? []);
+
+            if (!records.length) {
+                hasMore = false;
+                break;
+            }
+
+            console.log(`${state} page ${pageIndex}: ${records.length} records`);
+
+            for (const r of records) {
+                const stateCode = r.state ?? state;
+                const activities = Array.isArray(r.activities)
+                    ? r.activities.join('; ')
+                    : (r.activities ?? '');
+
+                const record = {
+                    company_name:              r.establishment_name ?? r.name ?? '',
+                    dba:                       r.dba_name ?? r.dba ?? '',
+                    address_1:                 r.address ?? r.street ?? '',
+                    city:                      r.city ?? '',
+                    state:                     stateCode,
+                    zip:                       r.zip ?? r.postal_code ?? '',
+                    county:                    r.county ?? '',
+                    latitude:                  r.latitude ?? '',
+                    longitude:                 r.longitude ?? '',
+                    usda_establishment_number: r.establishment_number ?? r.est_number ?? '',
+                    activities:                activities,
+                    facility_size:             r.size ?? r.facility_size ?? '',
+                    phone:                     r.phone ?? '',
+                    commodity_type:            'Meat/Poultry/Egg',
+                    equipment_type:            'Reefer',
+                    does_slaughter:            activities.toLowerCase().includes('slaughter') ? 'Yes' : 'No',
+                    ready_to_eat:              r.rte ? 'Yes' : 'No',
+                    processing_volume:         r.processing_volume_category ?? '',
+                    slaughter_volume:          r.slaughter_volume_category ?? '',
+                    hub:                       HUB_MAP[stateCode] ?? '',
+                    freight_region:            FREIGHT_MAP[stateCode] ?? '',
+                    census_region:             CENSUS_MAP[stateCode] ?? '',
+                    source:                    'USDA FSIS',
+                    run_date:                  TODAY,
+                };
+
+                await Actor.pushData(record);
+                totalRecords++;
+            }
+
+            if (records.length < 100) {
+                hasMore = false;
+            } else {
+                pageIndex++;
+            }
+
+        } catch (err) {
+            console.log(`Failed on ${state} page ${pageIndex}: ${err.message}`);
+            hasMore = false;
         }
+    }
+}
 
-        const hits = data?.hits?.hits ?? [];
-        const total = data?.hits?.total?.value ?? 0;
-
-        console.log(`${state} page ${page}: ${hits.length} records (total: ${total})`);
-
-        // ── PARSE EACH FACILITY ──
-        for (const hit of hits) {
-            const src = hit._source ?? {};
-
-            const stateCode = src.state ?? state;
-            const record = {
-                company_name:               src.establishment_name ?? '',
-                dba:                        src.dba_name ?? '',
-                address_1:                  src.address ?? '',
-                city:                       src.city ?? '',
-                state:                      stateCode,
-                zip:                        src.zip ?? '',
-                county:                     src.county ?? '',
-                latitude:                   src.latitude ?? '',
-                longitude:                  src.longitude ?? '',
-                usda_establishment_number:  src.establishment_number ?? '',
-                activities:                 (src.activities ?? []).join('; '),
-                facility_size:              src.size ?? '',
-                phone:                      src.phone ?? '',
-                commodity_type:             'Meat/Poultry/Egg',
-                equipment_type:             'Reefer',
-                does_slaughter:             src.activities?.includes('Slaughter') ? 'Yes' : 'No',
-                ready_to_eat:               src.rte ? 'Yes' : 'No',
-                processing_volume:          src.processing_volume_category ?? '',
-                slaughter_volume:           src.slaughter_volume_category ?? '',
-                hub:                        REGION_MAP[stateCode] ?? '',
-                freight_region:             FREIGHT_REGION_MAP[stateCode] ?? '',
-                census_region:              CENSUS_REGION_MAP[stateCode] ?? '',
-                source:                     'USDA FSIS',
-                run_date:                   new Date().toISOString().split('T')[0],
-            };
-
-            allResults.push(record);
-            await Actor.pushData(record);
-        }
-
-        // ── PAGINATE — queue next page if more results exist ──
-        const perPage = 100;
-        const totalPages = Math.ceil(total / perPage);
-
-        if (page < totalPages) {
-            const nextPage = page + 1;
-            await crawler.addRequests([{
-                url: `${BASE_URL}?establishmentType=Meat%2C+Poultry%2C+Egg&state=${state}&pageNumber=${nextPage}&numberOfElements=${perPage}`,
-                userData: { state, page: nextPage },
-            }]);
-        }
-    },
-
-    failedRequestHandler({ request }) {
-        console.log(`Request failed: ${request.url}`);
-    },
-});
-
-await crawler.run(startUrls);
-
-console.log(`✅ Done. Total records scraped: ${allResults.length}`);
-
+console.log(`✅ Done. Total records: ${totalRecords}`);
 await Actor.exit();
