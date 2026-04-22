@@ -9,16 +9,23 @@ await Actor.init();
  * Endpoint:    https://www.fsis.usda.gov/fsis/api/establishments/mpi
  * Method:      GET, no auth required
  * Records:     Returns ALL 7,166 records every call regardless of filters
- * Pagination:  BROKEN — page 1, 2, 3 all return same 7,166 records
- * State filter: BROKEN server-side — must filter client-side after pull
- * Strategy:    Pull once. Filter on our end. Done.
+ * Pagination:  BROKEN — all pages return same 7,166 records
+ * State filter: BROKEN server-side — filter client-side after pull
+ * Geolocation: Returned as single string "lat, lon" — must split
+ * Strategy:    Pull once. Filter on our end. Split geolocation. Done.
+ * ═══════════════════════════════════════════════════════
+ * OUTPUT COLUMN ORDER — matches ShipPath Master Warehouse exactly:
+ * Company Name, DBA, Address, City, State, ZIP, County,
+ * Latitude, Longitude, USDA Est #, Hub, Freight Region,
+ * Census Region, Commodity Detail, Equipment Type, Facility Size,
+ * Slaughter?, Ready-to-Eat?, Beef, Pork, Chicken, Turkey,
+ * Processing Vol, Slaughter Vol, Source
  * ═══════════════════════════════════════════════════════
  */
 
 // ── INPUT ──────────────────────────────────────────────
 const input = await Actor.getInput() ?? {};
 const states = (input.states ?? ['GA', 'TN', 'AR', 'MS']).map(s => s.toUpperCase());
-
 console.log(`Target states: ${states.join(', ')}`);
 
 // ── REGION MAPS ────────────────────────────────────────
@@ -68,14 +75,7 @@ try {
 
     const data = await response.json();
     allRecords = Array.isArray(data) ? data : (data.data ?? data.results ?? data.establishments ?? []);
-
-    console.log(`STEP 1 COMPLETE — Total records received from API: ${allRecords.length}`);
-
-    // Print first record's field names so we always know the schema
-    if (allRecords.length > 0) {
-        console.log(`API field names: ${Object.keys(allRecords[0]).join(', ')}`);
-        console.log(`Sample record: ${JSON.stringify(allRecords[0], null, 2)}`);
-    }
+    console.log(`STEP 1 COMPLETE — Total records from API: ${allRecords.length}`);
 
 } catch (err) {
     console.log(`API call failed: ${err.message}`);
@@ -85,55 +85,60 @@ try {
 // ── STEP 2: FILTER CLIENT-SIDE BY STATE ───────────────
 const stateSet = new Set(states);
 const filtered = allRecords.filter(r => stateSet.has((r.state ?? '').toUpperCase()));
-
-console.log(`STEP 2 COMPLETE — Records after filtering for [${states.join(', ')}]: ${filtered.length}`);
-
-// Break down by state
+console.log(`STEP 2 COMPLETE — Records after filtering: ${filtered.length}`);
 for (const s of states) {
     const count = filtered.filter(r => (r.state ?? '').toUpperCase() === s).length;
     console.log(`  ${s}: ${count} records`);
 }
 
-if (filtered.length === 0) {
-    console.log('WARNING: 0 records after filter. Check that state field name matches.');
-    console.log('Available state values in first 10 records:');
-    allRecords.slice(0, 10).forEach(r => console.log(`  state field: "${r.state}"`));
-}
-
-// ── STEP 3: MAP TO SHIPPATH SCHEMA AND OUTPUT ─────────
+// ── STEP 3: MAP TO SHIPPATH SCHEMA ────────────────────
+// Output columns match Google Sheet Master Warehouse exactly
 for (const r of filtered) {
     const stateCode = (r.state ?? '').toUpperCase();
     const activities = Array.isArray(r.activities)
         ? r.activities.join('; ')
         : (r.activities ?? '');
+    const dba = Array.isArray(r.dbas)
+        ? r.dbas.join('; ')
+        : (r.dbas ?? r.dba ?? '');
+
+    // Split geolocation "lat, lon" into two fields
+    let latitude = '';
+    let longitude = '';
+    if (r.geolocation) {
+        const parts = String(r.geolocation).split(',');
+        latitude  = parts[0]?.trim() ?? '';
+        longitude = parts[1]?.trim() ?? '';
+    }
 
     await Actor.pushData({
-        company_name:              r.establishment_name ?? r.name ?? '',
-        dba:                       r.dba_name ?? r.dba ?? '',
-        address_1:                 r.address ?? r.street ?? '',
-        city:                      r.city ?? '',
-        state:                     stateCode,
-        zip:                       r.zip ?? r.postal_code ?? '',
-        county:                    r.county ?? '',
-        latitude:                  r.latitude ?? '',
-        longitude:                 r.longitude ?? '',
-        usda_establishment_number: r.establishment_number ?? r.est_number ?? '',
-        activities:                activities,
-        facility_size:             r.size ?? r.facility_size ?? '',
-        phone:                     r.phone ?? '',
-        commodity_type:            'Meat/Poultry/Egg',
-        equipment_type:            'Reefer',
-        does_slaughter:            activities.toLowerCase().includes('slaughter') ? 'Yes' : 'No',
-        ready_to_eat:              r.rte ? 'Yes' : 'No',
-        processing_volume:         r.processing_volume_category ?? '',
-        slaughter_volume:          r.slaughter_volume_category ?? '',
-        hub:                       HUB_MAP[stateCode] ?? '',
-        freight_region:            FREIGHT_MAP[stateCode] ?? '',
-        census_region:             CENSUS_MAP[stateCode] ?? '',
-        source:                    'USDA FSIS',
-        run_date:                  TODAY,
+        'Company Name':     r.establishment_name ?? '',
+        'DBA':              dba,
+        'Address':          r.address ?? '',
+        'City':             r.city ?? '',
+        'State':            stateCode,
+        'ZIP':              r.zip ?? '',
+        'County':           r.county ?? '',
+        'Latitude':         latitude,
+        'Longitude':        longitude,
+        'USDA Est #':       r.establishment_number ?? '',
+        'Hub':              HUB_MAP[stateCode] ?? '',
+        'Freight Region':   FREIGHT_MAP[stateCode] ?? '',
+        'Census Region':    CENSUS_MAP[stateCode] ?? '',
+        'Commodity Detail': 'Meat/Poultry/Egg',
+        'Equipment Type':   'Reefer',
+        'Facility Size':    r.size ?? '',
+        'Slaughter?':       activities.toLowerCase().includes('slaughter') ? 'Yes' : 'No',
+        'Ready-to-Eat?':    '',
+        'Beef':             '',
+        'Pork':             '',
+        'Chicken':          '',
+        'Turkey':           '',
+        'Processing Vol':   r.processing_volume_category ?? '',
+        'Slaughter Vol':    r.slaughter_volume_category ?? '',
+        'Source':           'USDA FSIS',
     });
 }
 
-console.log(`✅ DONE — ${filtered.length} records pushed to Apify dataset.`);
+console.log(`✅ DONE — ${filtered.length} records pushed.`);
 await Actor.exit();
