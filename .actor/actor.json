@@ -1,0 +1,27 @@
+{
+    "actorSpecification": 1,
+    "name": "shippath-data-engine",
+    "title": "ShipPath Data Engine",
+    "description": "Scrapes USDA FSIS meat and poultry facilities by state. Outputs to Apify dataset for import into Google Sheets.",
+    "version": "1.0",
+    "input": {
+        "title": "ShipPath Scraper Input",
+        "type": "object",
+        "schemaVersion": 1,
+        "properties": {
+            "states": {
+                "title": "States to scrape",
+                "type": "array",
+                "description": "List of 2-letter state codes to scrape. Example: [\"GA\", \"TN\", \"MS\"]",
+                "default": ["GA", "TN", "AR", "MS"],
+                "editor": "json"
+            },
+            "maxRequestsPerCrawl": {
+                "title": "Max requests",
+                "type": "integer",
+                "description": "Safety limit on total requests. Increase for more states.",
+                "default": 500
+            }
+        }
+    }
+}
