@@ -52,7 +52,7 @@ const TODAY = new Date().toISOString().split('T')[0];
 
 // ── STEP 1: LOAD DEMOGRAPHIC LOOKUP FROM GITHUB ───────
 console.log('Loading demographic lookup from GitHub...');
-const DEMO_URL = 'https://raw.githubusercontent.com/nolanmarcouxllc/shippath-data-engine/main/demographic_lookup.csv';
+const DEMO_URL = 'https://raw.githubusercontent.com/nolanmarcouxllc/shippath-data-engine/main/Dataset_Establishment_Demographic_Data.csv';
 
 const demoMap = {};
 try {
