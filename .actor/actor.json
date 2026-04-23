@@ -1,27 +1,35 @@
 {
-    "actorSpecification": 1,
-    "name": "shippath-data-engine",
-    "title": "ShipPath Data Engine",
-    "description": "Scrapes USDA FSIS meat and poultry facilities by state. Outputs to Apify dataset for import into Google Sheets.",
-    "version": "1.0",
-    "input": {
-        "title": "ShipPath Scraper Input",
-        "type": "object",
-        "schemaVersion": 1,
-        "properties": {
-            "states": {
-                "title": "States to scrape",
-                "type": "array",
-                "description": "List of 2-letter state codes to scrape. Example: [\"GA\", \"TN\", \"MS\"]",
-                "default": ["GA", "TN", "AR", "MS"],
-                "editor": "json"
-            },
-            "maxRequestsPerCrawl": {
-                "title": "Max requests",
-                "type": "integer",
-                "description": "Safety limit on total requests. Increase for more states.",
-                "default": 500
-            }
-        }
-    }
+  "actorSpecification": 1,
+  "name": "shippath-usda-enrichment",
+  "title": "ShipPath USDA Enrichment Actor",
+  "description": "Joins USDA MPI directory + demographic data, tags every record with hub/freight/census region, writes to Google Sheets Master Warehouse tab.",
+  "version": "1.0",
+  "input": {
+    "title": "ShipPath Actor Input",
+    "type": "object",
+    "schemaVersion": 1,
+    "properties": {
+      "googleSheetsId": {
+        "title": "Google Sheets ID",
+        "type": "string",
+        "description": "The ID from your Google Sheet URL (between /d/ and /edit)",
+        "editor": "textfield"
+      },
+      "googleServiceAccountJson": {
+        "title": "Google Service Account JSON",
+        "type": "string",
+        "description": "Full JSON contents of your Google service account credentials. Store this as an Apify secret.",
+        "editor": "textarea",
+        "isSecret": true
+      },
+      "stateFilter": {
+        "title": "State Filter (optional)",
+        "type": "string",
+        "description": "2-letter state code to filter results (e.g. CA, TX). Leave blank to process all states.",
+        "editor": "textfield",
+        "default": ""
+      }
+    },
+    "required": ["googleSheetsId", "googleServiceAccountJson"]
+  }
 }
