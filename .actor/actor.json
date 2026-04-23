@@ -2,34 +2,19 @@
   "actorSpecification": 1,
   "name": "shippath-usda-enrichment",
   "title": "ShipPath USDA Enrichment Actor",
-  "description": "Joins USDA MPI directory + demographic data, tags every record with hub/freight/census region, writes to Google Sheets Master Warehouse tab.",
   "version": "1.0",
   "input": {
     "title": "ShipPath Actor Input",
     "type": "object",
     "schemaVersion": 1,
     "properties": {
-      "googleSheetsId": {
-        "title": "Google Sheets ID",
+      "states": {
+        "title": "States to process",
         "type": "string",
-        "description": "The ID from your Google Sheet URL (between /d/ and /edit)",
-        "editor": "textfield"
-      },
-      "googleServiceAccountJson": {
-        "title": "Google Service Account JSON",
-        "type": "string",
-        "description": "Full JSON contents of your Google service account credentials. Store this as an Apify secret.",
-        "editor": "textarea",
-        "isSecret": true
-      },
-      "stateFilter": {
-        "title": "State Filter (optional)",
-        "type": "string",
-        "description": "2-letter state code to filter results (e.g. CA, TX). Leave blank to process all states.",
+        "description": "Comma-separated state codes. Example: CA,TX,IL. Leave blank for all states.",
         "editor": "textfield",
         "default": ""
       }
-    },
-    "required": ["googleSheetsId", "googleServiceAccountJson"]
+    }
   }
 }
